@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 )
 
 var (
@@ -38,19 +37,26 @@ func main() {
 		log.Printf("FLAG: --%s=%q", flag.Name, flag.Value)
 	})
 
-	// Try to detect if there is a default kubeconfig on the home dir
-	// if no kubeconfig was specified
+	var err error
+	var config *rest.Config
+	// Try to get the internal configuration based on the Service Account
 	if kubeconfig == "" {
-		if home := homedir.HomeDir(); home != "" {
-			log.Printf("Using default kubeconfig location")
-			kubeconfig = filepath.Join(home, ".kube", "config")
+		// If the Pod runs inside a cluster it can use the InCluster configuration
+		// creates the in-cluster config
+		// 		tokenFile  = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+		//    rootCAFile = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+		// and the apiserver URL
+		// host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			panic(err.Error())
 		}
-	}
-
-	// use the current context in kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		panic(err.Error())
+	} else {
+		// use the current context in kubeconfig
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			panic(err.Error())
+		}
 	}
 
 	// create the clientset

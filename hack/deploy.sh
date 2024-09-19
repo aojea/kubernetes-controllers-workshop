@@ -18,4 +18,4 @@ docker build --load -t aojea/mycontroller:test .
 kind load docker-image aojea/mycontroller:test
 
 # Install the deployment
-kubectl apply -f ./config/deployment.yaml
+kubectl delete -f ./config/deployment.yaml && kubectl apply -f ./config/deployment.yaml
