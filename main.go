@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -33,6 +34,7 @@ import (
 var (
 	kubeconfig         string
 	bindMetricsAddress string
+	ready              atomic.Bool
 )
 
 func init() {
@@ -108,6 +110,13 @@ func main() {
 
 	controllerMux := mux.NewPathRecorderMux("mycontroller")
 	controllerMux.Handle("/metrics", legacyregistry.Handler())
+	controllerMux.HandleFunc("/readyz", func(rw http.ResponseWriter, req *http.Request) {
+		if ready.Load() {
+			rw.WriteHeader(http.StatusOK)
+		} else {
+			http.Error(rw, "not ready", http.StatusInternalServerError)
+		}
+	})
 
 	go func() {
 		err := http.ListenAndServe(bindMetricsAddress, controllerMux)
@@ -122,6 +131,7 @@ func main() {
 	informersFactory.Start(ctx.Done())
 
 	go controller.Run(ctx, 5) // use 5 workers
+	ready.Store(true)
 
 	klog.Infoln("---")
 	<-ctx.Done()
