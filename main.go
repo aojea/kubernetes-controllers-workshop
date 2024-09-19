@@ -1,14 +1,13 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -68,16 +67,20 @@ func main() {
 		panic(err.Error())
 	}
 
+	informersFactory := informers.NewSharedInformerFactory(clientset, 0)
+	podInformer := informersFactory.Core().V1().Pods()
+	podLister := podInformer.Lister()
+
 	for {
 		// List all Pods in the cluster
-		pods, err := clientset.CoreV1().Pods(v1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
+		pods, err := podLister.List(labels.Everything())
 		if err != nil {
 			panic(err.Error())
 		}
-		klog.Infof("There are %d pods in the cluster\n", len(pods.Items))
+		klog.Infof("There are %d pods in the cluster\n", len(pods))
 
 		if klog.V(2).Enabled() {
-			for _, pod := range pods.Items {
+			for _, pod := range pods {
 				klog.Infof("Found Pod %s on Namespace %s\n", pod.Name, pod.Namespace)
 			}
 		}
