@@ -178,6 +178,10 @@ func (c *Controller) processNextItem() bool {
 
 func (c *Controller) reconcile(key string) error {
 	klog.Infof("processing Pod %s", key)
+	start := time.Now()
+	defer func() {
+		klog.Infof("finished to process Pod %s, it took %v", key, time.Since(start))
+	}()
 
 	ns, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
