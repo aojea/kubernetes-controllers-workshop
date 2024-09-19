@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"time"
@@ -12,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apiserver/pkg/server/mux"
 	"k8s.io/client-go/informers"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -22,14 +24,20 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+
+	"k8s.io/component-base/metrics/legacyregistry"
+	_ "k8s.io/component-base/metrics/prometheus/clientgo" // load all the prometheus client-go plugin
+	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 )
 
 var (
-	kubeconfig string
+	kubeconfig         string
+	bindMetricsAddress string
 )
 
 func init() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
+	flag.StringVar(&bindMetricsAddress, "bind-metrics-address", "0.0.0.0:10550", "The IP address and port for the metrics server to serve on, defaulting to 0.0.0.0:10550")
 
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage: controller [options]\n\n")
@@ -95,6 +103,16 @@ func main() {
 			klog.Infof("Exiting: received signal")
 			cancel()
 		case <-ctx.Done():
+		}
+	}()
+
+	controllerMux := mux.NewPathRecorderMux("mycontroller")
+	controllerMux.Handle("/metrics", legacyregistry.Handler())
+
+	go func() {
+		err := http.ListenAndServe(bindMetricsAddress, controllerMux)
+		if err != nil {
+			// ListenAndServer always returns an error on exit
 		}
 	}()
 
