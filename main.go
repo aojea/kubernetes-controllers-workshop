@@ -10,8 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/server/mux"
@@ -23,6 +25,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -35,11 +39,15 @@ var (
 	kubeconfig         string
 	bindMetricsAddress string
 	ready              atomic.Bool
+	leaseLockName      string
+	leaseLockNamespace string
 )
 
 func init() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	flag.StringVar(&bindMetricsAddress, "bind-metrics-address", "0.0.0.0:10550", "The IP address and port for the metrics server to serve on, defaulting to 0.0.0.0:10550")
+	flag.StringVar(&leaseLockName, "lease-lock-name", "mycontroller", "the lease lock resource name")
+	flag.StringVar(&leaseLockNamespace, "lease-lock-namespace", "default", "the lease lock resource namespace")
 
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage: controller [options]\n\n")
@@ -130,11 +138,63 @@ func main() {
 	controller := NewController(clientset, podInformer)
 	informersFactory.Start(ctx.Done())
 
-	go controller.Run(ctx, 5) // use 5 workers
 	ready.Store(true)
 
-	klog.Infoln("---")
-	<-ctx.Done()
+	run := func(ctx context.Context) {
+		klog.Info("Controller loop...")
+		go controller.Run(ctx, 5) // use 5 workers
+		<-ctx.Done()
+	}
+
+	id := uuid.New().String()
+	// we use the Lease lock type since edits to Leases are less common
+	// and fewer objects in the cluster watch "all Leases".
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      leaseLockName,
+			Namespace: leaseLockNamespace,
+		},
+		Client: clientset.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: id,
+		},
+	}
+
+	// start the leader election code loop
+	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+		Lock: lock,
+		// IMPORTANT: you MUST ensure that any code you have that
+		// is protected by the lease must terminate **before**
+		// you call cancel. Otherwise, you could have a background
+		// loop still running and another process could
+		// get elected before your background loop finished, violating
+		// the stated goal of the lease.
+		ReleaseOnCancel: true,
+		LeaseDuration:   60 * time.Second,
+		RenewDeadline:   15 * time.Second,
+		RetryPeriod:     5 * time.Second,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				// we're notified when we start - this is where you would
+				// usually put your code
+				run(ctx)
+			},
+			OnStoppedLeading: func() {
+				// we can do cleanup here
+				klog.Infof("leader lost: %s", id)
+				os.Exit(0)
+			},
+			OnNewLeader: func(identity string) {
+				// we're notified when new leader elected
+				if identity == id {
+					// I just got the lock
+					return
+				}
+				klog.Infof("new leader elected: %s", identity)
+			},
+		},
+	})
+
 }
 
 // Controller demonstrates how to implement a controller with client-go.
