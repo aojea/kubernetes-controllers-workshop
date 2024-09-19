@@ -1,0 +1,32 @@
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: mycontroller
+rules:
+- apiGroups: [""]
+  resources:
+  - pods
+  verbs:
+  - "get"
+  - "list"
+  - "watch"
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: mycontroller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mycontroller
+subjects:
+- kind: ServiceAccount
+  name: mycontroller
+  namespace: default
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mycontroller
+  namespace: default
