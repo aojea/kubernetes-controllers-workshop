@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -29,12 +29,15 @@ func init() {
 }
 
 func main() {
+	// enable logging
+	klog.InitFlags(nil)
+
 	// Try to get the Kubeconfig from flags
 
 	// Parse command line flags and arguments
 	flag.Parse()
 	flag.VisitAll(func(flag *flag.Flag) {
-		log.Printf("FLAG: --%s=%q", flag.Name, flag.Value)
+		klog.Infof("FLAG: --%s=%q", flag.Name, flag.Value)
 	})
 
 	var err error
@@ -71,12 +74,14 @@ func main() {
 		if err != nil {
 			panic(err.Error())
 		}
-		fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
+		klog.Infof("There are %d pods in the cluster\n", len(pods.Items))
 
-		for _, pod := range pods.Items {
-			fmt.Printf("Found Pod %s on Namespace %s\n", pod.Name, pod.Namespace)
+		if klog.V(2).Enabled() {
+			for _, pod := range pods.Items {
+				klog.Infof("Found Pod %s on Namespace %s\n", pod.Name, pod.Namespace)
+			}
 		}
-		fmt.Println("---")
+		klog.Infoln("---")
 		time.Sleep(10 * time.Second)
 	}
 }
