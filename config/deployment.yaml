@@ -18,6 +18,7 @@ spec:
         app: mycontroller
         k8s-app: mycontroller
     spec:
+      serviceAccount: mycontroller
       containers:
       - name: proxy
         image: aojea/mycontroller:test
