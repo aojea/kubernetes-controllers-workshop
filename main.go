@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -67,9 +70,32 @@ func main() {
 		panic(err.Error())
 	}
 
+	// trap Ctrl+C and call cancel on the context
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+
+	// Enable signal handler
+	signalCh := make(chan os.Signal, 2)
+	defer func() {
+		close(signalCh)
+		cancel()
+	}()
+	signal.Notify(signalCh, os.Interrupt, unix.SIGINT)
+
+	go func() {
+		select {
+		case <-signalCh:
+			klog.Infof("Exiting: received signal")
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
 	informersFactory := informers.NewSharedInformerFactory(clientset, 0)
 	podInformer := informersFactory.Core().V1().Pods()
 	podLister := podInformer.Lister()
+
+	informersFactory.Start(ctx.Done())
 
 	for {
 		// List all Pods in the cluster
@@ -85,6 +111,11 @@ func main() {
 			}
 		}
 		klog.Infoln("---")
-		time.Sleep(10 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			time.Sleep(10 * time.Second)
+		}
 	}
 }
