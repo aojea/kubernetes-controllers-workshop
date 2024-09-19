@@ -1,0 +1,31 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mycontroller
+  labels:
+    app: mycontroller
+    k8s-app: mycontroller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mycontroller
+  template:
+    metadata:
+      labels:
+        tier: node
+        app: mycontroller
+        k8s-app: mycontroller
+    spec:
+      containers:
+      - name: proxy
+        image: aojea/mycontroller:test
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "50Mi"
+          limits:
+            cpu: "100m"
+            memory: "50Mi"
+---
