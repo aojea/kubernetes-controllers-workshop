@@ -283,7 +283,7 @@ func (c *Controller) reconcile(key string) error {
 		klog.Infof("Failed to split meta namespace cache key %s", key)
 		return err
 	}
-	pod, err := c.pulpoLister.Pulpos(ns).Get(name)
+	pulpo, err := c.pulpoLister.Pulpos(ns).Get(name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// This means the pod no longer exist in the informer cache
@@ -302,11 +302,18 @@ func (c *Controller) reconcile(key string) error {
 	// async operations before our resource is deleted. We use finalizer to avoid the object
 	// to be deleted.
 	// https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/
-	if pod.DeletionTimestamp != nil {
+	if pulpo.DeletionTimestamp != nil {
 		klog.Infof("Pulpo %s is being deleted\n", key)
 		return nil
 	}
 
+	// don't mutate the object
+	newPulpo := pulpo.DeepCopy()
+	newPulpo.Status.TentaculosDisponibles = *newPulpo.Spec.Tentaculos
+	_, err = c.client.PulpoconV1alpha1().Pulpos(ns).UpdateStatus(context.Background(), newPulpo, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
 	// Note that you also have to check the uid if you have a local controlled resource, which
 	// is dependent on the actual instance, to detect that a Pulpo was recreated with the same name
 	klog.Infof("Sync/Add/Update for Pulpo %s\n", key)
