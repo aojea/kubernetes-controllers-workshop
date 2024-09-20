@@ -1,0 +1,8 @@
+apiVersion: "pulpocon.io/v1alpha1"
+kind: Pulpo
+metadata:
+  name: pulpito
+spec:
+  origen: "Cies"
+  tentaculos: 12
+status:

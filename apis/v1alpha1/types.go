@@ -8,11 +8,14 @@ import (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Pulpo is a specification for a Pulpo resource
+// +k8s:openapi-gen=true
+// +kubebuilder:subresource:status
 type Pulpo struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   PulpoSpec   `json:"spec"`
+	// +optional
+	Spec PulpoSpec `json:"spec"`
+	// +optional
 	Status PulpoStatus `json:"status"`
 }
 

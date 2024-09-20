@@ -4,13 +4,13 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.15.0
-  name: pulpoes.pulpocon.io
+  name: pulpos.pulpocon.io
 spec:
   group: pulpocon.io
   names:
     kind: Pulpo
     listKind: PulpoList
-    plural: pulpoes
+    plural: pulpos
     singular: pulpo
   scope: Namespaced
   versions:
@@ -57,9 +57,8 @@ spec:
             required:
             - tentaculosDisponibles
             type: object
-        required:
-        - spec
-        - status
         type: object
     served: true
     storage: true
+    subresources:
+      status: {}
