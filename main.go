@@ -17,11 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/server/mux"
-	"k8s.io/client-go/informers"
-	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
-	clientset "k8s.io/client-go/kubernetes"
-	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
@@ -33,6 +29,11 @@ import (
 	"k8s.io/component-base/metrics/legacyregistry"
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // load all the prometheus client-go plugin
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
+
+	pulpoclient "github.com/aojea/kubernetes-controllers-workshop/apis/generated/clientset/versioned"
+	pulpoinformersfactory "github.com/aojea/kubernetes-controllers-workshop/apis/generated/informers/externalversions"
+	pulpoinformers "github.com/aojea/kubernetes-controllers-workshop/apis/generated/informers/externalversions/apis/v1alpha1"
+	pulpolisters "github.com/aojea/kubernetes-controllers-workshop/apis/generated/listers/apis/v1alpha1"
 )
 
 var (
@@ -71,7 +72,7 @@ func main() {
 	var config *rest.Config
 	// Try to get the internal configuration based on the Service Account
 	if kubeconfig == "" {
-		// If the Pod runs inside a cluster it can use the InCluster configuration
+		// If the Pulpo runs inside a cluster it can use the InCluster configuration
 		// creates the in-cluster config
 		// 		tokenFile  = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 		//    rootCAFile = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
@@ -91,6 +92,12 @@ func main() {
 
 	// create the clientset
 	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// creates the CRD clientset
+	crdClientset, err := pulpoclient.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -133,11 +140,11 @@ func main() {
 		}
 	}()
 
-	informersFactory := informers.NewSharedInformerFactory(clientset, 0)
-	podInformer := informersFactory.Core().V1().Pods()
-	controller := NewController(clientset, podInformer)
-	informersFactory.Start(ctx.Done())
+	factory := pulpoinformersfactory.NewSharedInformerFactory(crdClientset, 0)
+	pulpoInfomer := factory.Pulpocon().V1alpha1().Pulpos()
+	controller := NewController(crdClientset, pulpoInfomer)
 
+	factory.Start(ctx.Done())
 	ready.Store(true)
 
 	run := func(ctx context.Context) {
@@ -199,19 +206,19 @@ func main() {
 
 // Controller demonstrates how to implement a controller with client-go.
 type Controller struct {
-	client           clientset.Interface
+	client           pulpoclient.Interface
 	queue            workqueue.TypedRateLimitingInterface[string]
-	podLister        corelisters.PodLister
-	podsSynced       cache.InformerSynced
+	pulpoLister      pulpolisters.PulpoLister
+	pulpoSynced      cache.InformerSynced
 	workerLoopPeriod time.Duration
 }
 
 // NewController creates a new Controller.
-func NewController(client clientset.Interface, podInformer coreinformers.PodInformer) *Controller {
+func NewController(client pulpoclient.Interface, pulpoInfomer pulpoinformers.PulpoInformer) *Controller {
 	c := &Controller{
-		client:     client,
-		podLister:  podInformer.Lister(),
-		podsSynced: podInformer.Informer().HasSynced,
+		client:      client,
+		pulpoLister: pulpoInfomer.Lister(),
+		pulpoSynced: pulpoInfomer.Informer().HasSynced,
 		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
 			workqueue.DefaultTypedControllerRateLimiter[string](),
 			workqueue.TypedRateLimitingQueueConfig[string]{
@@ -220,25 +227,25 @@ func NewController(client clientset.Interface, podInformer coreinformers.PodInfo
 		),
 		workerLoopPeriod: time.Second,
 	}
-	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	pulpoInfomer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
-				klog.Infof("Pod %s added", key)
+				klog.Infof("Pulpo %s added", key)
 				c.queue.Add(key)
 			}
 		},
 		UpdateFunc: func(old, cur interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(cur)
 			if err == nil {
-				klog.Infof("Pod %s updated", key)
+				klog.Infof("Pulpo %s updated", key)
 				c.queue.Add(key)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
-				klog.Infof("Pod %s deleted", key)
+				klog.Infof("Pulpo %s deleted", key)
 				c.queue.Add(key)
 			}
 		},
@@ -265,10 +272,10 @@ func (c *Controller) processNextItem() bool {
 }
 
 func (c *Controller) reconcile(key string) error {
-	klog.Infof("processing Pod %s", key)
+	klog.Infof("processing Pulpo %s", key)
 	start := time.Now()
 	defer func() {
-		klog.Infof("finished to process Pod %s, it took %v", key, time.Since(start))
+		klog.Infof("finished to process Pulpo %s, it took %v", key, time.Since(start))
 	}()
 
 	ns, name, err := cache.SplitMetaNamespaceKey(key)
@@ -276,14 +283,14 @@ func (c *Controller) reconcile(key string) error {
 		klog.Infof("Failed to split meta namespace cache key %s", key)
 		return err
 	}
-	pod, err := c.podLister.Pods(ns).Get(name)
+	pod, err := c.pulpoLister.Pulpos(ns).Get(name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// This means the pod no longer exist in the informer cache
 			// the cache is the eventual consistent state of the cluster
 			// so all the reconcilation related to the pod deletion goes here
 			// ... do delete stuff ...
-			klog.Infof("Pod %s does not exist anymore\n", key)
+			klog.Infof("Pulpo %s does not exist anymore\n", key)
 			return nil
 		}
 		klog.Errorf("Fetching object with key %s from store failed with %v", key, err)
@@ -296,13 +303,13 @@ func (c *Controller) reconcile(key string) error {
 	// to be deleted.
 	// https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/
 	if pod.DeletionTimestamp != nil {
-		klog.Infof("Pod %s is being deleted\n", key)
+		klog.Infof("Pulpo %s is being deleted\n", key)
 		return nil
 	}
 
 	// Note that you also have to check the uid if you have a local controlled resource, which
-	// is dependent on the actual instance, to detect that a Pod was recreated with the same name
-	klog.Infof("Sync/Add/Update for Pod %s\n", key)
+	// is dependent on the actual instance, to detect that a Pulpo was recreated with the same name
+	klog.Infof("Sync/Add/Update for Pulpo %s\n", key)
 	return nil
 }
 
@@ -338,10 +345,10 @@ func (c *Controller) Run(ctx context.Context, workers int) {
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
-	klog.Info("Starting Pod controller")
+	klog.Info("Starting Pulpo controller")
 
 	// Wait for all involved caches to be synced, before processing items from the queue is started
-	if !cache.WaitForCacheSync(ctx.Done(), c.podsSynced) {
+	if !cache.WaitForCacheSync(ctx.Done(), c.pulpoSynced) {
 		runtime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
 		return
 	}
@@ -351,7 +358,7 @@ func (c *Controller) Run(ctx context.Context, workers int) {
 	}
 
 	<-ctx.Done()
-	klog.Info("Stopping Pod controller")
+	klog.Info("Stopping Pulpo controller")
 }
 
 func (c *Controller) runWorker() {
